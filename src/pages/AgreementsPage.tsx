@@ -1,70 +1,17 @@
-import { useCallback } from "react";
-import { EmptyState } from "../components/feedback/EmptyState";
+import { BadgePercent, Handshake, Layers3, Plus, Search } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
 import { PageLoader } from "../components/feedback/PageLoader";
 import { PageHeader } from "../components/ui/PageHeader";
 import { ResponsiveTable } from "../components/ui/ResponsiveTable";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useResource } from "../hooks/useResource";
+import { api } from "../lib/api";
+import { nullable, numeric, runApiAction } from "../lib/actionHelpers";
 
-type AgreementRow = {
-  id: string;
-  code: string;
-  name: string;
-  type: string;
-  isActive: boolean;
-  plans: Array<{ id: string }>;
-};
-
-export const AgreementsPage = () => {
-  const selector = useCallback(
-    (payload: any) => payload.agreements as AgreementRow[],
-    [],
-  );
-  const { data, loading, error } = useResource<AgreementRow[]>(
-    "/agreements",
-    selector,
-  );
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Beneficios"
-        title="Convenios y coberturas"
-        description="Isapres, seguros, Cenabast y convenios institucionales."
-      />
-
-      {loading ? <PageLoader /> : null}
-      {error ? <div className="alert alert--error">{error}</div> : null}
-
-      {!loading && data?.length ? (
-        <section className="panel">
-          <ResponsiveTable
-            rows={data}
-            getKey={(row) => row.id}
-            columns={[
-              { key: "code", header: "Código", render: (row) => row.code },
-              { key: "name", header: "Convenio", render: (row) => row.name },
-              { key: "type", header: "Tipo", render: (row) => row.type },
-              {
-                key: "plans",
-                header: "Planes",
-                render: (row) => row.plans?.length ?? 0,
-              },
-              {
-                key: "status",
-                header: "Estado",
-                render: (row) => (
-                  <StatusBadge value={row.isActive ? "ACTIVE" : "INACTIVE"} />
-                ),
-              },
-            ]}
-          />
-        </section>
-      ) : null}
-
-      {!loading && data && !data.length ? (
-        <EmptyState title="Sin convenios" description="Aún no hay convenios configurados." />
-      ) : null}
-    </>
-  );
-};
+type Product={id:string;sku:string;name:string};
+type Benefit={id:string;productId?:string|null;discountType:string;discountValue:number|string;minimumQuantity:number;isActive:boolean;product?:Product|null};
+type Plan={id:string;code:string;name:string;description?:string|null;validFrom?:string|null;validUntil?:string|null;isActive:boolean;benefits:Benefit[];_count?:{coverages:number}};
+type Agreement={id:string;code:string;name:string;type:string;rut?:string|null;description?:string|null;validFrom?:string|null;validUntil?:string|null;isActive:boolean;plans:Plan[]};
+const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+export const AgreementsPage=()=>{const[q,setQ]=useState("");const[modal,setModal]=useState<"agreement"|"plan"|"benefit"|null>(null);const[selectedAgreement,setSelectedAgreement]=useState<Agreement|null>(null);const[selectedPlan,setSelectedPlan]=useState<Plan|null>(null);const[editing,setEditing]=useState<Agreement|null>(null);const[busy,setBusy]=useState(false);const[actionError,setActionError]=useState("");const agSel=useCallback((p:any)=>p.agreements as Agreement[],[]);const prodSel=useCallback((p:any)=>p.items as Product[],[]);const res=useResource<Agreement[]>("/agreements",agSel);const productsRes=useResource<Product[]>("/products?limit=100",prodSel);const rows=res.data??[];const products=productsRes.data??[];const filtered=useMemo(()=>rows.filter(r=>!q||norm([r.code,r.name,r.type,r.rut??""].join(" ")).includes(norm(q))),[rows,q]);const close=()=>{setModal(null);setSelectedAgreement(null);setSelectedPlan(null);setEditing(null);setActionError("")};const submit=async(v:Record<string,any>)=>{if(modal==="agreement"){const payload={code:String(v.code),name:String(v.name),type:String(v.type),rut:nullable(v.rut),description:nullable(v.description),validFrom:nullable(v.validFrom),validUntil:nullable(v.validUntil),isActive:Boolean(v.isActive)};await runApiAction(()=>editing?api.patch(`/agreements/${editing.id}`,payload):api.post("/agreements",payload),setBusy,setActionError,async()=>{await res.reload();close()})}if(modal==="plan"&&selectedAgreement)await runApiAction(()=>api.post(`/agreements/${selectedAgreement.id}/plans`,{code:String(v.code),name:String(v.name),description:nullable(v.description),validFrom:nullable(v.validFrom),validUntil:nullable(v.validUntil),isActive:Boolean(v.isActive)}),setBusy,setActionError,async()=>{await res.reload();close()});if(modal==="benefit"&&selectedPlan)await runApiAction(()=>api.post(`/agreements/plans/${selectedPlan.id}/benefits`,{productId:nullable(v.productId),discountType:String(v.discountType),discountValue:numeric(v.discountValue),maximumDiscount:v.maximumDiscount===""?null:numeric(v.maximumDiscount),minimumQuantity:numeric(v.minimumQuantity,1),validFrom:nullable(v.validFrom),validUntil:nullable(v.validUntil),isActive:true}),setBusy,setActionError,async()=>{await res.reload();close()})};let fields:ActionField[]=[];if(modal==="agreement")fields=[{name:"code",label:"Código",required:true},{name:"name",label:"Nombre",required:true},{name:"type",label:"Tipo",type:"select",required:true,options:["ISAPRE","INSURANCE","CENABAST","EMPLOYEE","INSTITUTIONAL","OTHER"].map(v=>({value:v,label:v}))},{name:"rut",label:"RUT"},{name:"validFrom",label:"Vigente desde",type:"date"},{name:"validUntil",label:"Vigente hasta",type:"date"},{name:"description",label:"Descripción",type:"textarea"},{name:"isActive",label:"Activo",type:"checkbox"}];if(modal==="plan")fields=[{name:"code",label:"Código plan",required:true},{name:"name",label:"Nombre plan",required:true},{name:"validFrom",label:"Vigente desde",type:"date"},{name:"validUntil",label:"Vigente hasta",type:"date"},{name:"description",label:"Descripción",type:"textarea"},{name:"isActive",label:"Activo",type:"checkbox"}];if(modal==="benefit")fields=[{name:"productId",label:"Producto (vacío = todos)",type:"select",options:products.map(p=>({value:p.id,label:`${p.sku} · ${p.name}`}))},{name:"discountType",label:"Tipo descuento",type:"select",required:true,options:["PERCENTAGE","FIXED_AMOUNT","FIXED_PRICE"].map(v=>({value:v,label:v.replaceAll("_"," ")}))},{name:"discountValue",label:"Valor descuento",type:"number",min:0,required:true},{name:"maximumDiscount",label:"Tope descuento",type:"number",min:0},{name:"minimumQuantity",label:"Cantidad mínima",type:"number",min:1,required:true},{name:"validFrom",label:"Vigente desde",type:"date"},{name:"validUntil",label:"Vigente hasta",type:"date"}];return <div className="module-v2"><PageHeader eyebrow="Beneficios" title="Convenios y coberturas" description="Isapres, seguros, Cenabast y convenios institucionales." actions={<button className="button button--primary" onClick={()=>{setEditing(null);setModal("agreement")}}><Plus size={17}/>Nuevo convenio</button>}/>{res.loading?<PageLoader/>:null}{res.error||productsRes.error||actionError?<div className="alert alert--error">{res.error||productsRes.error||actionError}</div>:null}{!res.loading?<><section className="module-v2__kpis"><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--green"><Handshake size={19}/></span><div><span>Convenios</span><strong>{rows.length}</strong><small>Configurados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--blue"><Handshake size={19}/></span><div><span>Activos</span><strong>{rows.filter(r=>r.isActive).length}</strong><small>Aplicables</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--amber"><Layers3 size={19}/></span><div><span>Planes</span><strong>{rows.reduce((s,r)=>s+r.plans.length,0)}</strong><small>Configurados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--violet"><BadgePercent size={19}/></span><div><span>Beneficios</span><strong>{rows.reduce((s,r)=>s+r.plans.reduce((a,p)=>a+p.benefits.length,0),0)}</strong><small>Reglas</small></div></article></section><section className="module-panel"><div className="module-panel__header module-panel__header--filters"><div><span className="module-panel__eyebrow">Beneficios</span><h2>Convenios configurados</h2></div><label className="module-search"><Search size={16}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Código, convenio o tipo..."/></label></div>{filtered.length?<ResponsiveTable rows={filtered} getKey={r=>r.id} columns={[{key:"code",header:"Código",render:r=>r.code},{key:"name",header:"Convenio",render:r=>r.name},{key:"type",header:"Tipo",render:r=>r.type},{key:"plans",header:"Planes",render:r=>r.plans.length},{key:"status",header:"Estado",render:r=><StatusBadge value={r.isActive?"ACTIVE":"INACTIVE"}/>},{key:"actions",header:"Acciones",render:r=><div className="row-actions"><button className="row-action" onClick={()=>{setEditing(r);setModal("agreement")}}>Editar</button><button className="row-action" onClick={()=>{setSelectedAgreement(r);setModal("plan")}}>+ Plan</button>{r.plans[0]?<button className="row-action" onClick={()=>{setSelectedPlan(r.plans[0]);setModal("benefit")}}>+ Beneficio</button>:null}</div>}]}/>:<div className="module-empty"><span className="module-empty__icon"><Handshake size={27}/></span><strong>Sin convenios</strong><p>Crea el primer convenio.</p></div>}</section></>:null}<ActionModal open={Boolean(modal)} title={modal==="agreement"?(editing?"Editar convenio":"Nuevo convenio"):modal==="plan"?"Nuevo plan":"Nuevo beneficio"} fields={fields} initialValues={modal==="agreement"?(editing??{type:"ISAPRE",isActive:true}):modal==="plan"?{isActive:true}:{discountType:"PERCENTAGE",minimumQuantity:1}} busy={busy} error={actionError} onClose={close} onSubmit={submit}/></div>}

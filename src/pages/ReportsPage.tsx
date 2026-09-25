@@ -4,6 +4,7 @@ import {
   FileText,
   PackageSearch,
   ReceiptText,
+  ShieldCheck,
 } from "lucide-react";
 
 import { API_URL } from "../lib/api";
@@ -30,20 +31,45 @@ const download = async (path: string, filename: string) => {
 };
 
 export const ReportsPage = () => (
-  <>
+  <div className="module-v2">
     <PageHeader
       eyebrow="Análisis"
       title="Reportes"
       description="Descarga información operacional para análisis y respaldo."
     />
 
-    <section className="reports-grid">
-      <article className="report-card">
-        <span className="report-card__icon">
-          <ReceiptText size={22} />
+    <section className="reports-v2__intro">
+      <div>
+        <span className="reports-v2__intro-icon">
+          <ShieldCheck size={22} />
         </span>
-        <h2>Ventas</h2>
+        <div>
+          <strong>Centro de reportes</strong>
+          <p>
+            Exporta información de ventas e inventario en formatos listos para análisis,
+            respaldo y auditoría.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section className="reports-v2__grid">
+      <article className="report-card report-card--v2">
+        <div className="report-card__top">
+          <span className="report-card__icon">
+            <ReceiptText size={22} />
+          </span>
+          <span className="report-card__tag">Comercial</span>
+        </div>
+
+        <h2>Reporte de ventas</h2>
         <p>Ventas, vendedor, paciente, descuentos y coberturas.</p>
+
+        <div className="report-card__meta">
+          <span>Formatos disponibles</span>
+          <strong>Excel · PDF</strong>
+        </div>
+
         <div className="report-card__actions">
           <button
             className="button button--secondary"
@@ -52,6 +78,7 @@ export const ReportsPage = () => (
             <FileSpreadsheet size={17} />
             Excel
           </button>
+
           <button
             className="button button--secondary"
             onClick={() => void download("/reports/sales.pdf", "reporte-ventas.pdf")}
@@ -62,12 +89,22 @@ export const ReportsPage = () => (
         </div>
       </article>
 
-      <article className="report-card">
-        <span className="report-card__icon">
-          <PackageSearch size={22} />
-        </span>
-        <h2>Inventario</h2>
+      <article className="report-card report-card--v2">
+        <div className="report-card__top">
+          <span className="report-card__icon">
+            <PackageSearch size={22} />
+          </span>
+          <span className="report-card__tag">Inventario</span>
+        </div>
+
+        <h2>Reporte de inventario</h2>
         <p>Stock, categoría, laboratorio y productos en nivel crítico.</p>
+
+        <div className="report-card__meta">
+          <span>Formato disponible</span>
+          <strong>Excel</strong>
+        </div>
+
         <div className="report-card__actions">
           <button
             className="button button--secondary"
@@ -81,5 +118,5 @@ export const ReportsPage = () => (
         </div>
       </article>
     </section>
-  </>
+  </div>
 );

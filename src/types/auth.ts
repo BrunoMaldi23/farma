@@ -1,3 +1,18 @@
+﻿export type PermissionValue =
+  | string
+  | {
+      code: string;
+      name?: string;
+    };
+
+export type AuthRole =
+  | string
+  | {
+      code: string;
+      name: string;
+      permissions?: PermissionValue[];
+    };
+
 export type AuthUser = {
   id: string;
   rut: string;
@@ -5,8 +20,8 @@ export type AuthUser = {
   lastName: string;
   email: string | null;
   username: string;
-  role: string;
-  permissions: string[];
+  role: AuthRole;
+  permissions?: PermissionValue[];
 };
 
 export type LoginResponse = {

@@ -1,102 +1,23 @@
-import { RefreshCcw, UserPlus } from "lucide-react";
-import { useCallback } from "react";
-
-import { EmptyState } from "../components/feedback/EmptyState";
+import { Plus, RefreshCcw, Search, UsersRound } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
 import { PageLoader } from "../components/feedback/PageLoader";
 import { PageHeader } from "../components/ui/PageHeader";
 import { ResponsiveTable } from "../components/ui/ResponsiveTable";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useResource } from "../hooks/useResource";
+import { api } from "../lib/api";
+import { nullable, runApiAction } from "../lib/actionHelpers";
 
-type PatientRow = {
-  id: string;
-  rut: string;
-  firstName: string;
-  lastName: string;
-  phone: string | null;
-  email: string | null;
-  isActive: boolean;
-  _count: { prescriptions: number; sales: number };
-};
-
-export const PatientsPage = () => {
-  const selector = useCallback((payload: any) => payload.items as PatientRow[], []);
-  const { data, loading, error, reload } = useResource<PatientRow[]>(
-    "/patients?limit=50",
-    selector,
-  );
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Atención clínica"
-        title="Pacientes"
-        description="Ficha de pacientes, recetas, ventas y coberturas."
-        actions={
-          <>
-            <button className="button button--secondary" onClick={() => void reload()}>
-              <RefreshCcw size={17} />
-              Actualizar
-            </button>
-            <button className="button button--primary">
-              <UserPlus size={17} />
-              Nuevo paciente
-            </button>
-          </>
-        }
-      />
-
-      {loading ? <PageLoader /> : null}
-      {error ? <div className="alert alert--error">{error}</div> : null}
-
-      {!loading && data?.length ? (
-        <section className="panel">
-          <ResponsiveTable
-            rows={data}
-            getKey={(row) => row.id}
-            columns={[
-              {
-                key: "patient",
-                header: "Paciente",
-                render: (row) => (
-                  <div className="cell-stack">
-                    <strong>
-                      {row.firstName} {row.lastName}
-                    </strong>
-                    <span>{row.rut}</span>
-                  </div>
-                ),
-              },
-              { key: "phone", header: "Teléfono", render: (row) => row.phone ?? "—" },
-              { key: "email", header: "Correo", render: (row) => row.email ?? "—" },
-              {
-                key: "prescriptions",
-                header: "Recetas",
-                render: (row) => row._count?.prescriptions ?? 0,
-              },
-              {
-                key: "sales",
-                header: "Ventas",
-                render: (row) => row._count?.sales ?? 0,
-              },
-              {
-                key: "status",
-                header: "Estado",
-                render: (row) => (
-                  <StatusBadge value={row.isActive ? "ACTIVE" : "INACTIVE"} />
-                ),
-              },
-            ]}
-          />
-        </section>
-      ) : null}
-
-      {!loading && data && !data.length ? (
-        <EmptyState
-          title="Sin pacientes"
-          description="Todavía no existen pacientes registrados."
-        />
-      ) : null}
-    </>
-  );
-};
+type Patient = { id:string; rut:string; firstName:string; lastName:string; birthDate?:string|null; phone:string|null; email:string|null; address?:string|null; isActive:boolean; _count?:{prescriptions:number;sales:number} };
+const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+export const PatientsPage=()=>{
+ const [q,setQ]=useState(""); const [editing,setEditing]=useState<Patient|null>(null); const [open,setOpen]=useState(false); const [busy,setBusy]=useState(false); const [actionError,setActionError]=useState("");
+ const selector=useCallback((p:any)=>p.items as Patient[],[]); const res=useResource<Patient[]>("/patients?limit=100",selector); const rows=res.data??[];
+ const filtered=useMemo(()=>rows.filter(r=>!q||norm([r.firstName,r.lastName,r.rut,r.email??"",r.phone??""].join(" ")).includes(norm(q))),[rows,q]);
+ const fields:ActionField[]=[{name:"rut",label:"RUT",required:true},{name:"firstName",label:"Nombres",required:true},{name:"lastName",label:"Apellidos",required:true},{name:"birthDate",label:"Fecha nacimiento",type:"date"},{name:"phone",label:"Teléfono"},{name:"email",label:"Correo",type:"email"},{name:"address",label:"Dirección",type:"textarea"},{name:"isActive",label:"Paciente activo",type:"checkbox"}];
+ const close=()=>{setOpen(false);setEditing(null);setActionError("")};
+ const save=async(v:Record<string,any>)=>{const payload={rut:String(v.rut),firstName:String(v.firstName),lastName:String(v.lastName),birthDate:nullable(v.birthDate),phone:nullable(v.phone),email:nullable(v.email),address:nullable(v.address),isActive:Boolean(v.isActive)}; await runApiAction(()=>editing?api.patch(`/patients/${editing.id}`,payload):api.post("/patients",payload),setBusy,setActionError,async()=>{await res.reload();close()})};
+ const remove=async(r:Patient)=>{if(!confirm(`¿Eliminar o desactivar a ${r.firstName} ${r.lastName}?`))return; try{await api.delete(`/patients/${r.id}`);await res.reload()}catch(e:any){setActionError(e?.response?.data?.error?.message??e?.message??"Error")}};
+ return <div className="module-v2"><PageHeader eyebrow="Atención clínica" title="Pacientes" description="Ficha de pacientes, recetas, ventas y coberturas." actions={<div className="module-toolbar-actions"><button className="button button--secondary" onClick={()=>void res.reload()}><RefreshCcw size={17}/>Actualizar</button><button className="button button--primary" onClick={()=>{setEditing(null);setOpen(true)}}><Plus size={17}/>Nuevo paciente</button></div>}/>{res.loading?<PageLoader/>:null}{res.error||actionError?<div className="alert alert--error">{res.error||actionError}</div>:null}{!res.loading?<><section className="module-v2__kpis"><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--green"><UsersRound size={19}/></span><div><span>Pacientes</span><strong>{rows.length}</strong><small>Registrados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--blue"><UsersRound size={19}/></span><div><span>Activos</span><strong>{rows.filter(r=>r.isActive).length}</strong><small>Habilitados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--amber"><UsersRound size={19}/></span><div><span>Recetas</span><strong>{rows.reduce((s,r)=>s+(r._count?.prescriptions??0),0)}</strong><small>Asociadas</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--violet"><UsersRound size={19}/></span><div><span>Ventas</span><strong>{rows.reduce((s,r)=>s+(r._count?.sales??0),0)}</strong><small>Asociadas</small></div></article></section><section className="module-panel"><div className="module-panel__header module-panel__header--filters"><div><span className="module-panel__eyebrow">Fichas</span><h2>Pacientes registrados</h2></div><label className="module-search"><Search size={16}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre, RUT, correo..."/></label></div>{filtered.length?<ResponsiveTable rows={filtered} getKey={r=>r.id} columns={[{key:"name",header:"Paciente",render:r=><div className="cell-stack"><strong>{r.firstName} {r.lastName}</strong><span>{r.rut}</span></div>},{key:"phone",header:"Teléfono",render:r=>r.phone??"—"},{key:"email",header:"Correo",render:r=>r.email??"—"},{key:"status",header:"Estado",render:r=><StatusBadge value={r.isActive?"ACTIVE":"INACTIVE"}/>},{key:"actions",header:"Acciones",render:r=><div className="row-actions"><button className="row-action" onClick={()=>{setEditing(r);setOpen(true)}}>Editar</button><button className="row-action row-action--danger" onClick={()=>void remove(r)}>Eliminar</button></div>}]}/>:<div className="module-empty"><span className="module-empty__icon"><UsersRound size={27}/></span><strong>Sin pacientes</strong><p>Crea el primer paciente.</p></div>}</section></>:null}<ActionModal open={open} title={editing?"Editar paciente":"Nuevo paciente"} fields={fields} initialValues={editing??{isActive:true}} busy={busy} error={actionError} onClose={close} onSubmit={save}/></div>
+}

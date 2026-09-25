@@ -1,52 +1,16 @@
-import { Barcode, Search, ShoppingCart } from "lucide-react";
+import { Barcode, ChevronRight, Minus, Pill, Plus, ReceiptText, Search, ShoppingCart, Trash2, UserRound, WalletCards } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
+import { api, getApiErrorMessage } from "../lib/api";
+import { nullable, numeric, runApiAction } from "../lib/actionHelpers";
 
-import { PageHeader } from "../components/ui/PageHeader";
-
-export const PosPage = () => (
-  <>
-    <PageHeader
-      eyebrow="Punto de venta"
-      title="POS"
-      description="Interfaz preparada para búsqueda de productos, receta, FEFO y cobro."
-    />
-
-    <section className="pos-grid">
-      <article className="panel pos-catalog">
-        <div className="pos-search">
-          <Search size={19} />
-          <input placeholder="Buscar por nombre, SKU o código de barras..." />
-          <button className="icon-button" aria-label="Escanear código">
-            <Barcode size={21} />
-          </button>
-        </div>
-
-        <div className="pos-placeholder">
-          <ShoppingCart size={42} strokeWidth={1.4} />
-          <strong>Catálogo POS listo para conectar</strong>
-          <span>
-            En el próximo bloque visual agregaremos selección de productos,
-            paciente, receta, convenio y checkout.
-          </span>
-        </div>
-      </article>
-
-      <aside className="panel pos-summary">
-        <span className="panel__eyebrow">Venta actual</span>
-        <h2>Resumen</h2>
-
-        <div className="pos-summary__empty">
-          <span>No hay productos agregados.</span>
-        </div>
-
-        <div className="pos-total">
-          <span>Total</span>
-          <strong>$0</strong>
-        </div>
-
-        <button className="button button--primary button--block" disabled>
-          Cobrar
-        </button>
-      </aside>
-    </section>
-  </>
-);
+type Product={id:string;sku:string;barcode:string|null;name:string;salePrice:string|number;requiresPrescription:boolean;isControlled:boolean;isActive:boolean;category?:{name:string}|null;laboratory?:{name:string}|null};
+type StockRow={quantity:number;reservedQuantity:number;batch:{product:{id:string}}};
+type CashSession={id:string;status:string;cashRegister?:{name:string}|null};
+type Patient={id:string;rut:string;firstName:string;lastName:string;isActive:boolean};
+type RxItem={id:string;productId:string;remainingQuantity:number};
+type Rx={id:string;status:string;patientId:string;patient:Patient;items:RxItem[]};
+type CartItem={product:Product;quantity:number;stock:number;prescriptionItemId?:string|null};
+const clp=new Intl.NumberFormat("es-CL",{style:"currency",currency:"CLP",maximumFractionDigits:0});
+const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+export const PosPage=()=>{const[products,setProducts]=useState<Product[]>([]);const[stockRows,setStockRows]=useState<StockRow[]>([]);const[cashSessions,setCashSessions]=useState<CashSession[]>([]);const[patients,setPatients]=useState<Patient[]>([]);const[prescriptions,setPrescriptions]=useState<Rx[]>([]);const[cart,setCart]=useState<CartItem[]>([]);const[query,setQuery]=useState("");const[category,setCategory]=useState("TODAS");const[selectedPatientId,setSelectedPatientId]=useState("");const[checkoutOpen,setCheckoutOpen]=useState(false);const[loading,setLoading]=useState(true);const[busy,setBusy]=useState(false);const[error,setError]=useState("");const load=useCallback(async()=>{setLoading(true);setError("");try{const[p,s,c,pa,rx]=await Promise.all([api.get("/products?limit=100"),api.get("/inventory/stock?limit=100"),api.get("/cash/sessions?limit=100"),api.get("/patients?limit=100&active=true"),api.get("/prescriptions?limit=100")]);setProducts(p.data.items??[]);setStockRows(s.data.items??[]);setCashSessions(c.data.sessions??[]);setPatients(pa.data.items??[]);setPrescriptions(rx.data.items??[])}catch(e){setError(getApiErrorMessage(e))}finally{setLoading(false)}},[]);useEffect(()=>{void load()},[load]);const stockByProduct=useMemo(()=>{const m=new Map<string,number>();stockRows.forEach(r=>{const id=r.batch?.product?.id;if(id)m.set(id,(m.get(id)??0)+Math.max(0,Number(r.quantity)-Number(r.reservedQuantity)))});return m},[stockRows]);const categories=useMemo(()=>["TODAS",...Array.from(new Set(products.map(p=>p.category?.name).filter((v):v is string=>Boolean(v)))).sort((a,b)=>a.localeCompare(b,"es"))],[products]);const filtered=useMemo(()=>products.filter(p=>p.isActive&&(category==="TODAS"||p.category?.name===category)&&(!query||norm([p.name,p.sku,p.barcode??"",p.category?.name??"",p.laboratory?.name??""].join(" ")).includes(norm(query)))),[products,category,query]);const openCash=cashSessions.find(s=>s.status==="OPEN")??null;const selectedPatient=patients.find(p=>p.id===selectedPatientId)??null;const total=cart.reduce((s,i)=>s+Number(i.product.salePrice)*i.quantity,0);const units=cart.reduce((s,i)=>s+i.quantity,0);const findRxItem=(product:Product)=>{if(!product.requiresPrescription)return null;if(!selectedPatientId)return undefined;const rx=prescriptions.find(r=>r.patientId===selectedPatientId&&["ACTIVE","PARTIALLY_DISPENSED"].includes(r.status)&&r.items.some(i=>i.productId===product.id&&i.remainingQuantity>0));return rx?.items.find(i=>i.productId===product.id&&i.remainingQuantity>0)?.id};const add=(product:Product)=>{const stock=stockByProduct.get(product.id)??0;if(stock<=0)return;const rxItem=findRxItem(product);if(product.requiresPrescription&&!rxItem){setError(selectedPatientId?"El paciente no tiene una receta vigente con saldo para este producto.":"Selecciona un paciente antes de agregar medicamentos con receta.");return}setError("");setCart(current=>{const ex=current.find(i=>i.product.id===product.id);if(ex)return current.map(i=>i.product.id===product.id?{...i,quantity:Math.min(i.quantity+1,stock),prescriptionItemId:rxItem??i.prescriptionItemId}:i);return[...current,{product,quantity:1,stock,prescriptionItemId:rxItem??null}]})};const update=(id:string,n:number)=>setCart(c=>c.map(i=>i.product.id===id?{...i,quantity:Math.min(Math.max(n,0),i.stock)}:i).filter(i=>i.quantity>0));const checkoutFields:ActionField[]=[{name:"paymentMethod",label:"Medio de pago",type:"select",required:true,options:[{value:"CASH",label:"Efectivo"},{value:"DEBIT_CARD",label:"Débito"},{value:"CREDIT_CARD",label:"Crédito"},{value:"BANK_TRANSFER",label:"Transferencia"},{value:"OTHER",label:"Otro"}]},{name:"taxDocumentType",label:"Documento",type:"select",required:true,options:[{value:"RECEIPT",label:"Boleta"},{value:"INVOICE",label:"Factura"}]},{name:"referenceCode",label:"Referencia pago"},{name:"customerRut",label:"RUT cliente"},{name:"customerName",label:"Nombre cliente"},{name:"customerBusinessName",label:"Razón social"},{name:"customerBusinessActivity",label:"Giro"},{name:"customerAddress",label:"Dirección"},{name:"notes",label:"Notas",type:"textarea"}];const checkout=async(v:Record<string,any>)=>{if(!openCash){setError("Debes abrir una caja antes de cobrar.");return}await runApiAction(()=>api.post("/sales/checkout",{code:`VTA-${Date.now()}`,cashSessionId:openCash.id,patientId:selectedPatientId||null,customerRut:nullable(v.customerRut)||selectedPatient?.rut||null,customerName:nullable(v.customerName)||(selectedPatient?`${selectedPatient.firstName} ${selectedPatient.lastName}`:null),customerBusinessName:nullable(v.customerBusinessName),customerBusinessActivity:nullable(v.customerBusinessActivity),customerAddress:nullable(v.customerAddress),notes:nullable(v.notes),taxRate:19,taxDocumentType:String(v.taxDocumentType),items:cart.map(i=>({productId:i.product.id,quantity:i.quantity,discountAmount:0,prescriptionItemId:i.prescriptionItemId??null,locationId:null})),payments:[{method:String(v.paymentMethod),amount:numeric(total),referenceCode:nullable(v.referenceCode)}]}),setBusy,setError,async()=>{setCart([]);setCheckoutOpen(false);await load()})};return <div className="pos-v2"><header className="pos-v2__header"><div><span className="pos-v2__eyebrow">Punto de venta</span><h1>POS</h1><p>Venta rápida con inventario por lote, receta y control FEFO.</p></div><div className={`pos-v2__cash ${openCash?"pos-v2__cash--open":""}`}><WalletCards size={17}/><div><span>Estado de caja</span><strong>{openCash?(openCash.cashRegister?.name??"Caja abierta"):"Sin caja abierta"}</strong></div></div></header>{error?<div className="alert alert--error">{error}</div>:null}<section className="pos-v2__layout"><div className="pos-v2__catalog"><div className="pos-v2__toolbar"><div className="pos-v2__search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar producto, SKU o código de barras..."/><span className="pos-v2__search-code"><Barcode size={18}/></span></div><div className="pos-v2__category-scroll">{categories.map(c=><button key={c} className={`pos-v2__category ${category===c?"pos-v2__category--active":""}`} onClick={()=>setCategory(c)}>{c==="TODAS"?"Todos":c}</button>)}</div></div><div className="pos-v2__catalog-heading"><div><h2>Productos</h2><span>{filtered.length} disponibles</span></div><button className="pos-v2__reload" onClick={()=>void load()}>Actualizar</button></div>{loading?<div className="pos-v2__loading">Cargando...</div>:<div className="pos-v2__products">{filtered.map(p=>{const stock=stockByProduct.get(p.id)??0;return <article className={`pos-product ${stock<=0?"pos-product--out":""}`} key={p.id}><div className="pos-product__top"><div className="pos-product__icon"><Pill size={21}/></div><div className="pos-product__badges">{p.isControlled?<span className="pos-product__badge pos-product__badge--controlled">Controlado</span>:p.requiresPrescription?<span className="pos-product__badge pos-product__badge--rx">Receta</span>:null}</div></div><div className="pos-product__body"><span className="pos-product__category">{p.category?.name??"Producto"}</span><h3>{p.name}</h3><small>{p.laboratory?.name??p.sku}</small></div><div className="pos-product__meta"><div><span>Stock</span><strong>{stock}</strong></div><strong className="pos-product__price">{clp.format(Number(p.salePrice))}</strong></div><button className="pos-product__add" disabled={stock<=0} onClick={()=>add(p)}><Plus size={16}/>{stock<=0?"Sin stock":"Agregar"}</button></article>})}</div>}</div><aside className="pos-v2__cart"><div className="pos-v2__cart-header"><div><span className="pos-v2__eyebrow">Venta actual</span><h2>Resumen</h2></div><div className="pos-v2__cart-count"><ShoppingCart size={16}/><span>{units}</span></div></div><label className="pos-v2__customer"><span className="pos-v2__customer-icon"><UserRound size={17}/></span><div><strong>{selectedPatient?`${selectedPatient.firstName} ${selectedPatient.lastName}`:"Venta directa"}</strong><span>{selectedPatient?selectedPatient.rut:"Seleccionar paciente"}</span></div><select value={selectedPatientId} onChange={e=>{setSelectedPatientId(e.target.value);setCart([])}}><option value="">Venta directa</option>{patients.map(p=><option value={p.id} key={p.id}>{p.rut} · {p.firstName} {p.lastName}</option>)}</select></label><div className="pos-v2__cart-items">{cart.length?cart.map(i=><div className="pos-cart-item" key={i.product.id}><div className="pos-cart-item__main"><div className="pos-cart-item__icon"><Pill size={17}/></div><div className="pos-cart-item__info"><strong>{i.product.name}</strong><span>{clp.format(Number(i.product.salePrice))} c/u</span></div><button className="pos-cart-item__remove" onClick={()=>setCart(c=>c.filter(x=>x.product.id!==i.product.id))}><Trash2 size={15}/></button></div><div className="pos-cart-item__bottom"><div className="pos-quantity"><button onClick={()=>update(i.product.id,i.quantity-1)}><Minus size={14}/></button><strong>{i.quantity}</strong><button onClick={()=>update(i.product.id,i.quantity+1)}><Plus size={14}/></button></div><strong>{clp.format(Number(i.product.salePrice)*i.quantity)}</strong></div></div>):<div className="pos-v2__cart-empty"><div><ShoppingCart size={26}/></div><strong>Tu venta está vacía</strong><span>Selecciona productos para comenzar.</span></div>}</div><div className="pos-v2__cart-footer"><div className="pos-v2__totals"><div><span>Productos</span><strong>{units}</strong></div><div className="pos-v2__total"><span>Total</span><strong>{clp.format(total)}</strong></div></div><button className="pos-v2__checkout" disabled={!cart.length||!openCash} onClick={()=>setCheckoutOpen(true)}><ReceiptText size={18}/><span>{openCash?"Continuar al pago":"Abrir caja para cobrar"}</span><ChevronRight size={17}/></button></div></aside></section><ActionModal open={checkoutOpen} title="Finalizar venta" description={`Total a pagar: ${clp.format(total)}`} fields={checkoutFields} initialValues={{paymentMethod:"CASH",taxDocumentType:"RECEIPT",customerRut:selectedPatient?.rut??"",customerName:selectedPatient?`${selectedPatient.firstName} ${selectedPatient.lastName}`:""}} busy={busy} error={error} onClose={()=>setCheckoutOpen(false)} onSubmit={checkout}/></div>}

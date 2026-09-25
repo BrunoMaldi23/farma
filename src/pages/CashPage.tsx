@@ -1,92 +1,15 @@
-import { useCallback } from "react";
-import { EmptyState } from "../components/feedback/EmptyState";
+import { Banknote, Plus, RefreshCcw, WalletCards } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
 import { PageLoader } from "../components/feedback/PageLoader";
 import { PageHeader } from "../components/ui/PageHeader";
 import { ResponsiveTable } from "../components/ui/ResponsiveTable";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useResource } from "../hooks/useResource";
+import { api } from "../lib/api";
+import { nullable, numeric, runApiAction } from "../lib/actionHelpers";
 
-type CashSession = {
-  id: string;
-  openedAt: string;
-  status: string;
-  openingAmount: string | number;
-  expectedAmount: string | number | null;
-  countedAmount: string | number | null;
-  cashRegister: { name: string };
-  openedBy: { username: string };
-  _count: { sales: number; movements: number };
-};
-
-const clp = new Intl.NumberFormat("es-CL", {
-  style: "currency",
-  currency: "CLP",
-  maximumFractionDigits: 0,
-});
-
-export const CashPage = () => {
-  const selector = useCallback(
-    (payload: any) => payload.sessions as CashSession[],
-    [],
-  );
-  const { data, loading, error } = useResource<CashSession[]>(
-    "/cash/sessions?limit=50",
-    selector,
-  );
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Tesorería"
-        title="Caja"
-        description="Sesiones de caja, aperturas, cierres y movimientos."
-      />
-
-      {loading ? <PageLoader /> : null}
-      {error ? <div className="alert alert--error">{error}</div> : null}
-
-      {!loading && data?.length ? (
-        <section className="panel">
-          <ResponsiveTable
-            rows={data}
-            getKey={(row) => row.id}
-            columns={[
-              {
-                key: "register",
-                header: "Caja",
-                render: (row) => row.cashRegister.name,
-              },
-              {
-                key: "opened",
-                header: "Apertura",
-                render: (row) => new Date(row.openedAt).toLocaleString("es-CL"),
-              },
-              {
-                key: "user",
-                header: "Usuario",
-                render: (row) => row.openedBy.username,
-              },
-              {
-                key: "amount",
-                header: "Monto inicial",
-                render: (row) => clp.format(Number(row.openingAmount)),
-              },
-              {
-                key: "sales",
-                header: "Ventas",
-                render: (row) => row._count?.sales ?? 0,
-              },
-              {
-                key: "status",
-                header: "Estado",
-                render: (row) => <StatusBadge value={row.status} />,
-              },
-            ]}
-          />
-        </section>
-      ) : null}
-
-      {!loading && data && !data.length ? <EmptyState title="Sin sesiones de caja" /> : null}
-    </>
-  );
-};
+type Register={id:string;code:string;name:string;description?:string|null;isActive:boolean};
+type Session={id:string;openedAt:string;closedAt?:string|null;status:string;openingAmount:number|string;expectedAmount?:number|string|null;countedAmount?:number|string|null;cashRegister:Register;openedBy:{username:string};_count?:{sales:number;movements:number}};
+const clp=new Intl.NumberFormat("es-CL",{style:"currency",currency:"CLP",maximumFractionDigits:0});
+export const CashPage=()=>{const[modal,setModal]=useState<"open"|"close"|"movement"|"register"|null>(null);const[selected,setSelected]=useState<Session|null>(null);const[busy,setBusy]=useState(false);const[actionError,setActionError]=useState("");const sessionSel=useCallback((p:any)=>p.sessions as Session[],[]);const regSel=useCallback((p:any)=>p.registers as Register[],[]);const sessionsRes=useResource<Session[]>("/cash/sessions?limit=100",sessionSel);const registersRes=useResource<Register[]>("/cash/registers",regSel);const sessions=sessionsRes.data??[];const registers=registersRes.data??[];const openSessions=sessions.filter(s=>s.status==="OPEN");const summary=useMemo(()=>({open:openSessions.length,opening:openSessions.reduce((a,s)=>a+Number(s.openingAmount??0),0),sales:openSessions.reduce((a,s)=>a+(s._count?.sales??0),0),expected:openSessions.reduce((a,s)=>a+Number(s.expectedAmount??s.openingAmount??0),0)}),[openSessions]);const closeModal=()=>{setModal(null);setSelected(null);setActionError("")};const reload=async()=>{await Promise.all([sessionsRes.reload(),registersRes.reload()])};const submit=async(v:Record<string,any>)=>{if(modal==="open")await runApiAction(()=>api.post("/cash/sessions/open",{cashRegisterId:String(v.cashRegisterId),openingAmount:numeric(v.openingAmount),notes:nullable(v.notes)}),setBusy,setActionError,async()=>{await reload();closeModal()});if(modal==="close"&&selected)await runApiAction(()=>api.post(`/cash/sessions/${selected.id}/close`,{countedAmount:numeric(v.countedAmount),notes:nullable(v.notes)}),setBusy,setActionError,async()=>{await reload();closeModal()});if(modal==="movement"&&selected)await runApiAction(()=>api.post(`/cash/sessions/${selected.id}/movements`,{type:String(v.type),amount:numeric(v.amount),description:String(v.description)}),setBusy,setActionError,async()=>{await reload();closeModal()});if(modal==="register")await runApiAction(()=>api.post("/cash/registers",{code:String(v.code),name:String(v.name),description:nullable(v.description),isActive:true}),setBusy,setActionError,async()=>{await reload();closeModal()})};let fields:ActionField[]=[];if(modal==="open")fields=[{name:"cashRegisterId",label:"Caja",type:"select",required:true,options:registers.filter(r=>r.isActive).map(r=>({value:r.id,label:r.name}))},{name:"openingAmount",label:"Monto inicial",type:"number",min:0,required:true},{name:"notes",label:"Notas",type:"textarea"}];if(modal==="close")fields=[{name:"countedAmount",label:"Monto contado",type:"number",min:0,required:true},{name:"notes",label:"Notas",type:"textarea"}];if(modal==="movement")fields=[{name:"type",label:"Tipo",type:"select",required:true,options:["INCOME","EXPENSE","WITHDRAWAL","ADJUSTMENT"].map(v=>({value:v,label:v}))},{name:"amount",label:"Monto",type:"number",min:1,required:true},{name:"description",label:"Descripción",required:true}];if(modal==="register")fields=[{name:"code",label:"Código",required:true},{name:"name",label:"Nombre",required:true},{name:"description",label:"Descripción",type:"textarea"}];return <div className="module-v2"><PageHeader eyebrow="Tesorería" title="Caja" description="Sesiones, aperturas, cierres y movimientos." actions={<div className="module-toolbar-actions"><button className="button button--secondary" onClick={()=>void reload()}><RefreshCcw size={17}/>Actualizar</button><button className="button button--secondary" onClick={()=>setModal("register")}><Plus size={17}/>Nueva caja</button><button className="button button--primary" onClick={()=>setModal("open")}><WalletCards size={17}/>Abrir caja</button></div>}/>{sessionsRes.loading?<PageLoader/>:null}{sessionsRes.error||registersRes.error||actionError?<div className="alert alert--error">{sessionsRes.error||registersRes.error||actionError}</div>:null}{!sessionsRes.loading?<><section className="module-v2__kpis"><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--green"><WalletCards size={19}/></span><div><span>Cajas abiertas</span><strong>{summary.open}</strong><small>Sesiones activas</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--blue"><Banknote size={19}/></span><div><span>Monto inicial</span><strong>{clp.format(summary.opening)}</strong><small>Sesiones abiertas</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--amber"><Banknote size={19}/></span><div><span>Ventas</span><strong>{summary.sales}</strong><small>Sesión actual</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--violet"><Banknote size={19}/></span><div><span>Esperado</span><strong>{clp.format(summary.expected)}</strong><small>Según movimientos</small></div></article></section><section className="module-panel"><div className="module-panel__header"><div><span className="module-panel__eyebrow">Sesiones</span><h2>Control de caja</h2></div></div>{sessions.length?<ResponsiveTable rows={sessions} getKey={r=>r.id} columns={[{key:"register",header:"Caja",render:r=>r.cashRegister.name},{key:"opened",header:"Apertura",render:r=>new Date(r.openedAt).toLocaleString("es-CL")},{key:"user",header:"Usuario",render:r=>r.openedBy.username},{key:"amount",header:"Inicial",render:r=>clp.format(Number(r.openingAmount))},{key:"sales",header:"Ventas",render:r=>r._count?.sales??0},{key:"status",header:"Estado",render:r=><StatusBadge value={r.status}/>},{key:"actions",header:"Acciones",render:r=>r.status==="OPEN"?<div className="row-actions"><button className="row-action" onClick={()=>{setSelected(r);setModal("movement")}}>Movimiento</button><button className="row-action" onClick={()=>{setSelected(r);setModal("close")}}>Cerrar</button></div>:<span>—</span>}]}/>:<div className="module-empty"><span className="module-empty__icon"><WalletCards size={27}/></span><strong>Sin sesiones</strong><p>Abre una caja para comenzar.</p></div>}</section></>:null}<ActionModal open={Boolean(modal)} title={modal==="open"?"Abrir caja":modal==="close"?"Cerrar caja":modal==="movement"?"Registrar movimiento":"Nueva caja"} fields={fields} initialValues={modal==="open"?{openingAmount:0}:modal==="movement"?{type:"INCOME"}:{}} busy={busy} error={actionError} onClose={closeModal} onSubmit={submit}/></div>}

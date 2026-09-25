@@ -1,99 +1,15 @@
-import { RefreshCcw, UserRoundPlus } from "lucide-react";
-import { useCallback } from "react";
-
-import { EmptyState } from "../components/feedback/EmptyState";
+import { KeyRound, Plus, RefreshCcw, Search, UsersRound } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
 import { PageLoader } from "../components/feedback/PageLoader";
 import { PageHeader } from "../components/ui/PageHeader";
 import { ResponsiveTable } from "../components/ui/ResponsiveTable";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useResource } from "../hooks/useResource";
+import { api } from "../lib/api";
+import { nullable, runApiAction } from "../lib/actionHelpers";
 
-type UserRow = {
-  id: string;
-  rut: string;
-  firstName: string;
-  lastName: string;
-  email: string | null;
-  username: string;
-  status: string;
-  role: {
-    name: string;
-    code: string;
-  };
-};
-
-export const UsersPage = () => {
-  const selector = useCallback((payload: any) => payload.items as UserRow[], []);
-  const { data, loading, error, reload } = useResource<UserRow[]>(
-    "/users?limit=50",
-    selector,
-  );
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Administración"
-        title="Usuarios"
-        description="Gestiona cuentas, roles y accesos del sistema."
-        actions={
-          <>
-            <button className="button button--secondary" onClick={() => void reload()}>
-              <RefreshCcw size={17} />
-              Actualizar
-            </button>
-            <button className="button button--primary">
-              <UserRoundPlus size={17} />
-              Nuevo usuario
-            </button>
-          </>
-        }
-      />
-
-      {loading ? <PageLoader /> : null}
-      {error ? <div className="alert alert--error">{error}</div> : null}
-
-      {!loading && data?.length ? (
-        <section className="panel">
-          <ResponsiveTable
-            rows={data}
-            getKey={(row) => row.id}
-            columns={[
-              {
-                key: "name",
-                header: "Usuario",
-                render: (row) => (
-                  <div className="cell-stack">
-                    <strong>
-                      {row.firstName} {row.lastName}
-                    </strong>
-                    <span>@{row.username}</span>
-                  </div>
-                ),
-              },
-              { key: "rut", header: "RUT", render: (row) => row.rut },
-              {
-                key: "role",
-                header: "Rol",
-                render: (row) => row.role?.name ?? row.role?.code,
-              },
-              {
-                key: "email",
-                header: "Correo",
-                render: (row) => row.email ?? "—",
-              },
-              {
-                key: "status",
-                header: "Estado",
-                render: (row) => <StatusBadge value={row.status} />,
-              },
-            ]}
-          />
-        </section>
-      ) : null}
-
-      {!loading && data && !data.length ? (
-        <EmptyState title="Sin usuarios" description="No se encontraron usuarios." />
-      ) : null}
-    </>
-  );
-};
+type Role={id:string;code:string;name:string};
+type User={id:string;rut:string;firstName:string;lastName:string;email:string|null;phone?:string|null;username:string;status:string;role:Role};
+const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+export const UsersPage=()=>{const[q,setQ]=useState("");const[open,setOpen]=useState(false);const[editing,setEditing]=useState<User|null>(null);const[busy,setBusy]=useState(false);const[actionError,setActionError]=useState("");const userSel=useCallback((p:any)=>p.items as User[],[]);const roleSel=useCallback((p:any)=>p.roles as Role[],[]);const usersRes=useResource<User[]>("/users?limit=100",userSel);const rolesRes=useResource<Role[]>("/access/roles",roleSel);const rows=usersRes.data??[];const roles=rolesRes.data??[];const filtered=useMemo(()=>rows.filter(r=>!q||norm([r.firstName,r.lastName,r.username,r.rut,r.email??"",r.role?.name??""].join(" ")).includes(norm(q))),[rows,q]);const fields:ActionField[]=[{name:"rut",label:"RUT",required:true},{name:"firstName",label:"Nombres",required:true},{name:"lastName",label:"Apellidos",required:true},{name:"email",label:"Correo",type:"email"},{name:"phone",label:"Teléfono"},{name:"username",label:"Usuario",required:true},{name:"password",label:editing?"Nueva contraseña (opcional)":"Contraseña",type:"password",required:!editing},{name:"roleId",label:"Rol",type:"select",required:true,options:roles.map(r=>({value:r.id,label:r.name}))},{name:"status",label:"Estado",type:"select",required:true,options:["ACTIVE","INACTIVE","BLOCKED"].map(v=>({value:v,label:v}))}];const close=()=>{setOpen(false);setEditing(null);setActionError("")};const save=async(v:Record<string,any>)=>{const payload:any={rut:String(v.rut),firstName:String(v.firstName),lastName:String(v.lastName),email:nullable(v.email),phone:nullable(v.phone),username:String(v.username),roleId:String(v.roleId),status:String(v.status||"ACTIVE")};if(String(v.password??"").trim())payload.password=String(v.password);await runApiAction(()=>editing?api.patch(`/users/${editing.id}`,payload):api.post("/users",payload),setBusy,setActionError,async()=>{await usersRes.reload();close()})};const remove=async(r:User)=>{if(!confirm(`¿Eliminar o desactivar a ${r.firstName} ${r.lastName}?`))return;try{await api.delete(`/users/${r.id}`);await usersRes.reload()}catch(e:any){setActionError(e?.response?.data?.error?.message??e?.message??"Error")}};return <div className="module-v2"><PageHeader eyebrow="Administración" title="Usuarios" description="Gestiona cuentas, roles y accesos del sistema." actions={<div className="module-toolbar-actions"><button className="button button--secondary" onClick={()=>void usersRes.reload()}><RefreshCcw size={17}/>Actualizar</button><button className="button button--primary" onClick={()=>{setEditing(null);setOpen(true)}}><Plus size={17}/>Nuevo usuario</button></div>}/>{usersRes.loading?<PageLoader/>:null}{usersRes.error||rolesRes.error||actionError?<div className="alert alert--error">{usersRes.error||rolesRes.error||actionError}</div>:null}{!usersRes.loading?<><section className="module-v2__kpis"><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--green"><UsersRound size={19}/></span><div><span>Usuarios</span><strong>{rows.length}</strong><small>Cuentas</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--blue"><UsersRound size={19}/></span><div><span>Activos</span><strong>{rows.filter(r=>r.status==="ACTIVE").length}</strong><small>Habilitados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--amber"><KeyRound size={19}/></span><div><span>Roles</span><strong>{roles.length}</strong><small>Perfiles</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--violet"><UsersRound size={19}/></span><div><span>Bloqueados</span><strong>{rows.filter(r=>r.status==="BLOCKED").length}</strong><small>Sin acceso</small></div></article></section><section className="module-panel"><div className="module-panel__header module-panel__header--filters"><div><span className="module-panel__eyebrow">Accesos</span><h2>Usuarios del sistema</h2></div><label className="module-search"><Search size={16}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre, usuario, RUT..."/></label></div>{filtered.length?<ResponsiveTable rows={filtered} getKey={r=>r.id} columns={[{key:"name",header:"Usuario",render:r=><div className="cell-stack"><strong>{r.firstName} {r.lastName}</strong><span>@{r.username}</span></div>},{key:"rut",header:"RUT",render:r=>r.rut},{key:"role",header:"Rol",render:r=>r.role?.name??"—"},{key:"email",header:"Correo",render:r=>r.email??"—"},{key:"status",header:"Estado",render:r=><StatusBadge value={r.status}/>},{key:"actions",header:"Acciones",render:r=><div className="row-actions"><button className="row-action" onClick={()=>{setEditing(r);setOpen(true)}}>Editar</button><button className="row-action row-action--danger" onClick={()=>void remove(r)}>Eliminar</button></div>}]}/>:<div className="module-empty"><span className="module-empty__icon"><UsersRound size={27}/></span><strong>Sin usuarios</strong><p>No hay usuarios registrados.</p></div>}</section></>:null}<ActionModal open={open} title={editing?"Editar usuario":"Nuevo usuario"} fields={fields} initialValues={editing?{...editing,roleId:editing.role?.id,password:""}:{status:"ACTIVE"}} busy={busy} error={actionError} onClose={close} onSubmit={save}/></div>}

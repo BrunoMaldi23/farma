@@ -1,71 +1,14 @@
-import { useCallback } from "react";
-import { EmptyState } from "../components/feedback/EmptyState";
+import { Plus, Search, Stethoscope } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
 import { PageLoader } from "../components/feedback/PageLoader";
 import { PageHeader } from "../components/ui/PageHeader";
 import { ResponsiveTable } from "../components/ui/ResponsiveTable";
+import { StatusBadge } from "../components/ui/StatusBadge";
 import { useResource } from "../hooks/useResource";
+import { api } from "../lib/api";
+import { nullable, runApiAction } from "../lib/actionHelpers";
 
-type DoctorRow = {
-  id: string;
-  rut: string;
-  firstName: string;
-  lastName: string;
-  specialty: string | null;
-  registration: string | null;
-  _count: { prescriptions: number };
-};
-
-export const DoctorsPage = () => {
-  const selector = useCallback((payload: any) => payload.items as DoctorRow[], []);
-  const { data, loading, error } = useResource<DoctorRow[]>(
-    "/doctors?limit=50",
-    selector,
-  );
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Atención clínica"
-        title="Médicos"
-        description="Profesionales asociados a las recetas registradas."
-      />
-
-      {loading ? <PageLoader /> : null}
-      {error ? <div className="alert alert--error">{error}</div> : null}
-
-      {!loading && data?.length ? (
-        <section className="panel">
-          <ResponsiveTable
-            rows={data}
-            getKey={(row) => row.id}
-            columns={[
-              {
-                key: "name",
-                header: "Profesional",
-                render: (row) => `${row.firstName} ${row.lastName}`,
-              },
-              { key: "rut", header: "RUT", render: (row) => row.rut },
-              {
-                key: "specialty",
-                header: "Especialidad",
-                render: (row) => row.specialty ?? "—",
-              },
-              {
-                key: "registration",
-                header: "Registro",
-                render: (row) => row.registration ?? "—",
-              },
-              {
-                key: "rx",
-                header: "Recetas",
-                render: (row) => row._count?.prescriptions ?? 0,
-              },
-            ]}
-          />
-        </section>
-      ) : null}
-
-      {!loading && data && !data.length ? <EmptyState title="Sin médicos" /> : null}
-    </>
-  );
-};
+type Doctor={id:string;rut:string;firstName:string;lastName:string;specialty:string|null;registration:string|null;phone?:string|null;email?:string|null;isActive:boolean;_count?:{prescriptions:number}};
+const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+export const DoctorsPage=()=>{const[q,setQ]=useState("");const[open,setOpen]=useState(false);const[editing,setEditing]=useState<Doctor|null>(null);const[busy,setBusy]=useState(false);const[actionError,setActionError]=useState("");const selector=useCallback((p:any)=>p.items as Doctor[],[]);const res=useResource<Doctor[]>("/doctors?limit=100",selector);const rows=res.data??[];const filtered=useMemo(()=>rows.filter(r=>!q||norm([r.firstName,r.lastName,r.rut,r.specialty??"",r.registration??""].join(" ")).includes(norm(q))),[rows,q]);const fields:ActionField[]=[{name:"rut",label:"RUT",required:true},{name:"firstName",label:"Nombres",required:true},{name:"lastName",label:"Apellidos",required:true},{name:"specialty",label:"Especialidad"},{name:"registration",label:"Registro profesional"},{name:"phone",label:"Teléfono"},{name:"email",label:"Correo",type:"email"},{name:"isActive",label:"Profesional activo",type:"checkbox"}];const close=()=>{setOpen(false);setEditing(null);setActionError("")};const save=async(v:Record<string,any>)=>{const payload={rut:String(v.rut),firstName:String(v.firstName),lastName:String(v.lastName),specialty:nullable(v.specialty),registration:nullable(v.registration),phone:nullable(v.phone),email:nullable(v.email),isActive:Boolean(v.isActive)};await runApiAction(()=>editing?api.patch(`/doctors/${editing.id}`,payload):api.post("/doctors",payload),setBusy,setActionError,async()=>{await res.reload();close()})};const remove=async(r:Doctor)=>{if(!confirm(`¿Eliminar o desactivar a ${r.firstName} ${r.lastName}?`))return;try{await api.delete(`/doctors/${r.id}`);await res.reload()}catch(e:any){setActionError(e?.response?.data?.error?.message??e?.message??"Error")}};return <div className="module-v2"><PageHeader eyebrow="Atención clínica" title="Médicos" description="Profesionales asociados a las recetas registradas." actions={<button className="button button--primary" onClick={()=>{setEditing(null);setOpen(true)}}><Plus size={17}/>Nuevo médico</button>}/>{res.loading?<PageLoader/>:null}{res.error||actionError?<div className="alert alert--error">{res.error||actionError}</div>:null}{!res.loading?<><section className="module-v2__kpis"><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--green"><Stethoscope size={19}/></span><div><span>Profesionales</span><strong>{rows.length}</strong><small>Registrados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--blue"><Stethoscope size={19}/></span><div><span>Activos</span><strong>{rows.filter(r=>r.isActive).length}</strong><small>Habilitados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--amber"><Stethoscope size={19}/></span><div><span>Especialidades</span><strong>{new Set(rows.map(r=>r.specialty).filter(Boolean)).size}</strong><small>Registradas</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--violet"><Stethoscope size={19}/></span><div><span>Recetas</span><strong>{rows.reduce((s,r)=>s+(r._count?.prescriptions??0),0)}</strong><small>Asociadas</small></div></article></section><section className="module-panel"><div className="module-panel__header module-panel__header--filters"><div><span className="module-panel__eyebrow">Profesionales</span><h2>Médicos registrados</h2></div><label className="module-search"><Search size={16}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre, RUT o especialidad..."/></label></div>{filtered.length?<ResponsiveTable rows={filtered} getKey={r=>r.id} columns={[{key:"name",header:"Profesional",render:r=><div className="cell-stack"><strong>{r.firstName} {r.lastName}</strong><span>{r.rut}</span></div>},{key:"specialty",header:"Especialidad",render:r=>r.specialty??"—"},{key:"registration",header:"Registro",render:r=>r.registration??"—"},{key:"status",header:"Estado",render:r=><StatusBadge value={r.isActive?"ACTIVE":"INACTIVE"}/>},{key:"actions",header:"Acciones",render:r=><div className="row-actions"><button className="row-action" onClick={()=>{setEditing(r);setOpen(true)}}>Editar</button><button className="row-action row-action--danger" onClick={()=>void remove(r)}>Eliminar</button></div>}]}/>:<div className="module-empty"><span className="module-empty__icon"><Stethoscope size={27}/></span><strong>Sin médicos</strong><p>Crea el primer profesional.</p></div>}</section></>:null}<ActionModal open={open} title={editing?"Editar médico":"Nuevo médico"} fields={fields} initialValues={editing??{isActive:true}} busy={busy} error={actionError} onClose={close} onSubmit={save}/></div>}

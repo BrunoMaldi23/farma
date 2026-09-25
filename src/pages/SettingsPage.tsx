@@ -1,57 +1,12 @@
-import { useCallback } from "react";
-import { EmptyState } from "../components/feedback/EmptyState";
+import { Eye, EyeOff, Plus, RefreshCcw, Search, Settings2 } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
 import { PageLoader } from "../components/feedback/PageLoader";
 import { PageHeader } from "../components/ui/PageHeader";
-import { ResponsiveTable } from "../components/ui/ResponsiveTable";
 import { useResource } from "../hooks/useResource";
+import { api } from "../lib/api";
+import { nullable, runApiAction } from "../lib/actionHelpers";
 
-type Setting = {
-  id: string;
-  key: string;
-  value: string;
-  description: string | null;
-  isPublic: boolean;
-};
-
-export const SettingsPage = () => {
-  const selector = useCallback((payload: any) => payload.settings as Setting[], []);
-  const { data, loading, error } = useResource<Setting[]>("/settings", selector);
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Sistema"
-        title="Configuración"
-        description="Parámetros generales de la farmacia y del sistema."
-      />
-
-      {loading ? <PageLoader /> : null}
-      {error ? <div className="alert alert--error">{error}</div> : null}
-
-      {!loading && data?.length ? (
-        <section className="panel">
-          <ResponsiveTable
-            rows={data}
-            getKey={(row) => row.id}
-            columns={[
-              { key: "key", header: "Clave", render: (row) => row.key },
-              { key: "value", header: "Valor", render: (row) => row.value },
-              {
-                key: "description",
-                header: "Descripción",
-                render: (row) => row.description ?? "—",
-              },
-              {
-                key: "public",
-                header: "Visibilidad",
-                render: (row) => (row.isPublic ? "Público" : "Interno"),
-              },
-            ]}
-          />
-        </section>
-      ) : null}
-
-      {!loading && data && !data.length ? <EmptyState title="Sin configuraciones" /> : null}
-    </>
-  );
-};
+type Setting={id:string;key:string;value:string;description:string|null;isPublic:boolean};
+const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+export const SettingsPage=()=>{const[q,setQ]=useState("");const[open,setOpen]=useState(false);const[editing,setEditing]=useState<Setting|null>(null);const[busy,setBusy]=useState(false);const[actionError,setActionError]=useState("");const selector=useCallback((p:any)=>p.settings as Setting[],[]);const res=useResource<Setting[]>("/settings",selector);const rows=res.data??[];const filtered=useMemo(()=>rows.filter(r=>!q||norm([r.key,r.value,r.description??""].join(" ")).includes(norm(q))),[rows,q]);const fields:ActionField[]=[{name:"key",label:"Clave",required:true,disabled:Boolean(editing)},{name:"value",label:"Valor",required:true},{name:"description",label:"Descripción",type:"textarea"},{name:"isPublic",label:"Público",type:"checkbox"}];const close=()=>{setOpen(false);setEditing(null);setActionError("")};const save=async(v:Record<string,any>)=>{await runApiAction(()=>api.put("/settings",{key:String(v.key),value:String(v.value),description:nullable(v.description),isPublic:Boolean(v.isPublic)}),setBusy,setActionError,async()=>{await res.reload();close()})};return <div className="module-v2"><PageHeader eyebrow="Sistema" title="Configuración" description="Parámetros generales de la farmacia y del sistema." actions={<div className="module-toolbar-actions"><button className="button button--secondary" onClick={()=>void res.reload()}><RefreshCcw size={17}/>Actualizar</button><button className="button button--primary" onClick={()=>{setEditing(null);setOpen(true)}}><Plus size={17}/>Nuevo parámetro</button></div>}/>{res.loading?<PageLoader/>:null}{res.error||actionError?<div className="alert alert--error">{res.error||actionError}</div>:null}{!res.loading?<><section className="module-v2__kpis"><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--green"><Settings2 size={19}/></span><div><span>Parámetros</span><strong>{rows.length}</strong><small>Configurados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--blue"><Eye size={19}/></span><div><span>Públicos</span><strong>{rows.filter(r=>r.isPublic).length}</strong><small>Visibles</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--amber"><EyeOff size={19}/></span><div><span>Internos</span><strong>{rows.filter(r=>!r.isPublic).length}</strong><small>Restringidos</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--violet"><Settings2 size={19}/></span><div><span>Estado</span><strong>OK</strong><small>Configuración cargada</small></div></article></section><section className="module-panel"><div className="module-panel__header module-panel__header--filters"><div><span className="module-panel__eyebrow">Parámetros</span><h2>Configuración general</h2></div><label className="module-search"><Search size={16}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar configuración..."/></label></div>{filtered.length?<div className="settings-list">{filtered.map(r=><article className="settings-row" key={r.id}><div className="settings-row__icon">{r.isPublic?<Eye size={18}/>:<EyeOff size={18}/>}</div><div className="settings-row__main"><div className="settings-row__heading"><div><span className="settings-row__group">Sistema</span><strong>{r.key}</strong></div><div className="row-actions"><span className={`settings-visibility ${r.isPublic?"settings-visibility--public":"settings-visibility--internal"}`}>{r.isPublic?"Público":"Interno"}</span><button className="row-action" onClick={()=>{setEditing(r);setOpen(true)}}>Editar</button></div></div><div className="settings-row__value"><span>Valor</span><strong>{r.value}</strong></div><p>{r.description??"Sin descripción"}</p></div></article>)}</div>:<div className="module-empty"><span className="module-empty__icon"><Settings2 size={27}/></span><strong>Sin configuraciones</strong><p>Crea el primer parámetro.</p></div>}</section></>:null}<ActionModal open={open} title={editing?"Editar parámetro":"Nuevo parámetro"} fields={fields} initialValues={editing??{isPublic:false}} busy={busy} error={actionError} onClose={close} onSubmit={save}/></div>}

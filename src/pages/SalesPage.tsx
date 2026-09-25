@@ -1,96 +1,16 @@
-import { RefreshCcw } from "lucide-react";
-import { useCallback } from "react";
-
-import { EmptyState } from "../components/feedback/EmptyState";
+import { CircleDollarSign, ReceiptText, RefreshCcw, Search, ShoppingBag } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
 import { PageLoader } from "../components/feedback/PageLoader";
 import { PageHeader } from "../components/ui/PageHeader";
 import { ResponsiveTable } from "../components/ui/ResponsiveTable";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useResource } from "../hooks/useResource";
+import { api } from "../lib/api";
+import { runApiAction } from "../lib/actionHelpers";
 
-type SaleRow = {
-  id: string;
-  code: string;
-  saleDate: string;
-  totalAmount: string | number;
-  status: string;
-  seller: { username: string };
-  patient: { rut: string; firstName: string; lastName: string } | null;
-};
-
-const clp = new Intl.NumberFormat("es-CL", {
-  style: "currency",
-  currency: "CLP",
-  maximumFractionDigits: 0,
-});
-
-export const SalesPage = () => {
-  const selector = useCallback((payload: any) => payload.items as SaleRow[], []);
-  const { data, loading, error, reload } = useResource<SaleRow[]>(
-    "/sales?limit=50",
-    selector,
-  );
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Operación"
-        title="Ventas"
-        description="Historial de transacciones realizadas en el POS."
-        actions={
-          <button className="button button--secondary" onClick={() => void reload()}>
-            <RefreshCcw size={17} />
-            Actualizar
-          </button>
-        }
-      />
-
-      {loading ? <PageLoader /> : null}
-      {error ? <div className="alert alert--error">{error}</div> : null}
-
-      {!loading && data?.length ? (
-        <section className="panel">
-          <ResponsiveTable
-            rows={data}
-            getKey={(row) => row.id}
-            columns={[
-              { key: "code", header: "Venta", render: (row) => row.code },
-              {
-                key: "date",
-                header: "Fecha",
-                render: (row) => new Date(row.saleDate).toLocaleString("es-CL"),
-              },
-              {
-                key: "patient",
-                header: "Paciente",
-                render: (row) =>
-                  row.patient
-                    ? `${row.patient.firstName} ${row.patient.lastName}`
-                    : "Venta directa",
-              },
-              {
-                key: "seller",
-                header: "Vendedor",
-                render: (row) => row.seller.username,
-              },
-              {
-                key: "total",
-                header: "Total",
-                render: (row) => clp.format(Number(row.totalAmount)),
-              },
-              {
-                key: "status",
-                header: "Estado",
-                render: (row) => <StatusBadge value={row.status} />,
-              },
-            ]}
-          />
-        </section>
-      ) : null}
-
-      {!loading && data && !data.length ? (
-        <EmptyState title="Sin ventas" description="Aún no existen ventas registradas." />
-      ) : null}
-    </>
-  );
-};
+type Sale={id:string;code:string;saleDate:string;totalAmount:number|string;status:string;seller:{username:string};patient:{rut:string;firstName:string;lastName:string}|null;taxDocuments?:Array<{folio:string;status:string}>};
+const clp=new Intl.NumberFormat("es-CL",{style:"currency",currency:"CLP",maximumFractionDigits:0});
+const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+const today=(v:string)=>{const d=new Date(v),n=new Date();return d.toDateString()===n.toDateString()};
+export const SalesPage=()=>{const[q,setQ]=useState("");const[status,setStatus]=useState("ALL");const[selected,setSelected]=useState<Sale|null>(null);const[modal,setModal]=useState<"cancel"|"dte"|null>(null);const[busy,setBusy]=useState(false);const[actionError,setActionError]=useState("");const selector=useCallback((p:any)=>p.items as Sale[],[]);const res=useResource<Sale[]>("/sales?limit=100",selector);const rows=res.data??[];const filtered=useMemo(()=>rows.filter(r=>(status==="ALL"||r.status===status)&&(!q||norm([r.code,r.seller?.username??"",r.patient?.rut??"",r.patient?.firstName??"",r.patient?.lastName??""].join(" ")).includes(norm(q)))),[rows,q,status]);const t=rows.filter(r=>today(r.saleDate));const total=t.reduce((s,r)=>s+Number(r.totalAmount),0);const close=()=>{setModal(null);setSelected(null);setActionError("")};const submit=async(v:Record<string,any>)=>{if(!selected)return;if(modal==="cancel")await runApiAction(()=>api.post(`/sales/${selected.id}/cancel`,{reason:String(v.reason)}),setBusy,setActionError,async()=>{await res.reload();close()});if(modal==="dte")await runApiAction(()=>api.post(`/sales/${selected.id}/tax-document/mock-issue`,{folio:String(v.folio||"")||undefined}),setBusy,setActionError,async()=>{await res.reload();close()})};const fields:ActionField[]=modal==="cancel"?[{name:"reason",label:"Motivo de anulación",type:"textarea",required:true}]:[{name:"folio",label:"Folio (opcional)"}];return <div className="module-v2"><PageHeader eyebrow="Operación" title="Ventas" description="Historial de transacciones realizadas en el POS." actions={<button className="button button--secondary" onClick={()=>void res.reload()}><RefreshCcw size={17}/>Actualizar</button>}/>{res.loading?<PageLoader/>:null}{res.error||actionError?<div className="alert alert--error">{res.error||actionError}</div>:null}{!res.loading?<><section className="module-v2__kpis"><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--green"><ReceiptText size={19}/></span><div><span>Ventas hoy</span><strong>{t.length}</strong><small>Transacciones</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--blue"><CircleDollarSign size={19}/></span><div><span>Total hoy</span><strong>{clp.format(total)}</strong><small>Venta bruta</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--amber"><ShoppingBag size={19}/></span><div><span>Ticket promedio</span><strong>{clp.format(t.length?total/t.length:0)}</strong><small>Hoy</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--violet"><ReceiptText size={19}/></span><div><span>Canceladas</span><strong>{rows.filter(r=>r.status==="CANCELLED").length}</strong><small>Historial</small></div></article></section><section className="module-panel"><div className="module-panel__header module-panel__header--filters"><div><span className="module-panel__eyebrow">Historial</span><h2>Transacciones</h2></div><div className="module-filters"><label className="module-search"><Search size={16}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Venta, paciente o vendedor..."/></label><select className="module-select" value={status} onChange={e=>setStatus(e.target.value)}><option value="ALL">Todos</option>{["DRAFT","COMPLETED","CANCELLED","REFUNDED"].map(v=><option value={v} key={v}>{v}</option>)}</select></div></div>{filtered.length?<ResponsiveTable rows={filtered} getKey={r=>r.id} columns={[{key:"code",header:"Venta",render:r=><div className="cell-stack"><strong>{r.code}</strong><span>{new Date(r.saleDate).toLocaleString("es-CL")}</span></div>},{key:"patient",header:"Paciente",render:r=>r.patient?`${r.patient.firstName} ${r.patient.lastName}`:"Venta directa"},{key:"seller",header:"Vendedor",render:r=>r.seller.username},{key:"total",header:"Total",render:r=>clp.format(Number(r.totalAmount))},{key:"status",header:"Estado",render:r=><StatusBadge value={r.status}/>},{key:"actions",header:"Acciones",render:r=><div className="row-actions">{r.status==="COMPLETED"?<><button className="row-action" onClick={()=>{setSelected(r);setModal("dte")}}>Emitir DTE</button><button className="row-action row-action--danger" onClick={()=>{setSelected(r);setModal("cancel")}}>Anular</button></>:<span>—</span>}</div>}]}/>:<div className="module-empty"><span className="module-empty__icon"><ReceiptText size={27}/></span><strong>Sin ventas</strong><p>Las ventas realizadas en el POS aparecerán aquí.</p></div>}</section></>:null}<ActionModal open={Boolean(modal)} title={modal==="cancel"?"Anular venta":"Emitir DTE"} fields={fields} busy={busy} error={actionError} onClose={close} onSubmit={submit}/></div>}

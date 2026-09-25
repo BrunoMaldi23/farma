@@ -1,75 +1,18 @@
-import { useCallback } from "react";
-import { EmptyState } from "../components/feedback/EmptyState";
+import { LockKeyhole, Plus, Search } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ActionModal, type ActionField } from "../components/ui/ActionModal";
 import { PageLoader } from "../components/feedback/PageLoader";
 import { PageHeader } from "../components/ui/PageHeader";
 import { ResponsiveTable } from "../components/ui/ResponsiveTable";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useResource } from "../hooks/useResource";
+import { api } from "../lib/api";
+import { nullable, numeric, runApiAction } from "../lib/actionHelpers";
 
-type ControlledRow = {
-  id: string;
-  recordNumber: string;
-  movementType: string;
-  quantity: number;
-  occurredAt: string;
-  status: string;
-  product: { name: string; sku: string };
-  batch: { batchNumber: string } | null;
-  patient: { rut: string; firstName: string; lastName: string } | null;
-};
-
-export const ControlledPage = () => {
-  const selector = useCallback((payload: any) => payload.items as ControlledRow[], []);
-  const { data, loading, error } = useResource<ControlledRow[]>(
-    "/controlled-drugs?limit=50",
-    selector,
-  );
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Trazabilidad"
-        title="Medicamentos controlados"
-        description="Libro de movimientos y seguimiento de productos sujetos a control."
-      />
-
-      {loading ? <PageLoader /> : null}
-      {error ? <div className="alert alert--error">{error}</div> : null}
-
-      {!loading && data?.length ? (
-        <section className="panel">
-          <ResponsiveTable
-            rows={data}
-            getKey={(row) => row.id}
-            columns={[
-              { key: "record", header: "Registro", render: (row) => row.recordNumber },
-              {
-                key: "product",
-                header: "Producto",
-                render: (row) => row.product.name,
-              },
-              {
-                key: "movement",
-                header: "Movimiento",
-                render: (row) => row.movementType.replaceAll("_", " "),
-              },
-              { key: "quantity", header: "Cantidad", render: (row) => row.quantity },
-              {
-                key: "date",
-                header: "Fecha",
-                render: (row) => new Date(row.occurredAt).toLocaleString("es-CL"),
-              },
-              {
-                key: "status",
-                header: "Estado",
-                render: (row) => <StatusBadge value={row.status} />,
-              },
-            ]}
-          />
-        </section>
-      ) : null}
-
-      {!loading && data && !data.length ? <EmptyState title="Sin registros controlados" /> : null}
-    </>
-  );
-};
+type Product={id:string;sku:string;name:string;isControlled:boolean};
+type Batch={id:string;batchNumber:string;product:{id:string;name:string}};
+type Patient={id:string;rut:string;firstName:string;lastName:string};
+type Doctor={id:string;rut:string;firstName:string;lastName:string};
+type RecordRow={id:string;recordNumber:string;movementType:string;quantity:number;occurredAt:string;status:string;product:Product;batch:Batch|null;patient:Patient|null};
+const norm=(v:string)=>v.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+export const ControlledPage=()=>{const[q,setQ]=useState("");const[open,setOpen]=useState(false);const[busy,setBusy]=useState(false);const[actionError,setActionError]=useState("");const recSel=useCallback((p:any)=>p.items as RecordRow[],[]);const prodSel=useCallback((p:any)=>p.items as Product[],[]);const batchSel=useCallback((p:any)=>p.items as Batch[],[]);const patientSel=useCallback((p:any)=>p.items as Patient[],[]);const doctorSel=useCallback((p:any)=>p.items as Doctor[],[]);const recRes=useResource<RecordRow[]>("/controlled-drugs?limit=100",recSel);const prodRes=useResource<Product[]>("/products?limit=100&isControlled=true",prodSel);const batchRes=useResource<Batch[]>("/inventory/batches?limit=100",batchSel);const patientRes=useResource<Patient[]>("/patients?limit=100",patientSel);const doctorRes=useResource<Doctor[]>("/doctors?limit=100",doctorSel);const rows=recRes.data??[];const filtered=useMemo(()=>rows.filter(r=>!q||norm([r.recordNumber,r.product?.name??"",r.product?.sku??"",r.batch?.batchNumber??"",r.patient?.rut??""].join(" ")).includes(norm(q))),[rows,q]);const fields:ActionField[]=[{name:"recordNumber",label:"N° registro",required:true},{name:"movementType",label:"Movimiento",type:"select",required:true,options:["PURCHASE_RECEIPT","RETURN","ADJUSTMENT_IN","ADJUSTMENT_OUT","DESTRUCTION"].map(v=>({value:v,label:v.replaceAll("_"," ")}))},{name:"productId",label:"Producto controlado",type:"select",required:true,options:(prodRes.data??[]).map(p=>({value:p.id,label:`${p.sku} · ${p.name}`}))},{name:"batchId",label:"Lote",type:"select",options:(batchRes.data??[]).map(b=>({value:b.id,label:`${b.batchNumber} · ${b.product?.name??""}`}))},{name:"patientId",label:"Paciente",type:"select",options:(patientRes.data??[]).map(p=>({value:p.id,label:`${p.rut} · ${p.firstName} ${p.lastName}`}))},{name:"doctorId",label:"Médico",type:"select",options:(doctorRes.data??[]).map(d=>({value:d.id,label:`${d.firstName} ${d.lastName}`}))},{name:"quantity",label:"Cantidad",type:"number",min:1,required:true},{name:"balanceBefore",label:"Saldo antes",type:"number"},{name:"balanceAfter",label:"Saldo después",type:"number"},{name:"prescriptionFolio",label:"Folio receta"},{name:"ispReference",label:"Referencia ISP"},{name:"reason",label:"Motivo",type:"textarea"}];const close=()=>{setOpen(false);setActionError("")};const save=async(v:Record<string,any>)=>{const payload:any={recordNumber:String(v.recordNumber),movementType:String(v.movementType),productId:String(v.productId),batchId:nullable(v.batchId),patientId:nullable(v.patientId),doctorId:nullable(v.doctorId),quantity:numeric(v.quantity),prescriptionFolio:nullable(v.prescriptionFolio),ispReference:nullable(v.ispReference),reason:nullable(v.reason)};if(v.balanceBefore!=="")payload.balanceBefore=numeric(v.balanceBefore);if(v.balanceAfter!=="")payload.balanceAfter=numeric(v.balanceAfter);await runApiAction(()=>api.post("/controlled-drugs",payload),setBusy,setActionError,async()=>{await recRes.reload();close()})};return <div className="module-v2"><PageHeader eyebrow="Trazabilidad" title="Medicamentos controlados" description="Libro de movimientos y seguimiento de productos sujetos a control." actions={<button className="button button--primary" onClick={()=>setOpen(true)}><Plus size={17}/>Nuevo registro</button>}/>{recRes.loading?<PageLoader/>:null}{recRes.error||actionError?<div className="alert alert--error">{recRes.error||actionError}</div>:null}{!recRes.loading?<><section className="module-v2__kpis"><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--danger"><LockKeyhole size={19}/></span><div><span>Registros</span><strong>{rows.length}</strong><small>Trazados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--amber"><LockKeyhole size={19}/></span><div><span>Unidades</span><strong>{rows.reduce((s,r)=>s+Number(r.quantity),0)}</strong><small>Movidas</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--blue"><LockKeyhole size={19}/></span><div><span>Productos</span><strong>{new Set(rows.map(r=>r.product?.id).filter(Boolean)).size}</strong><small>Controlados</small></div></article><article className="module-kpi"><span className="module-kpi__icon module-kpi__icon--violet"><LockKeyhole size={19}/></span><div><span>Activos</span><strong>{rows.filter(r=>r.status==="ACTIVE").length}</strong><small>Registros</small></div></article></section><section className="module-panel"><div className="module-panel__header module-panel__header--filters"><div><span className="module-panel__eyebrow">Libro de control</span><h2>Movimientos registrados</h2></div><label className="module-search"><Search size={16}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Registro, producto o lote..."/></label></div>{filtered.length?<ResponsiveTable rows={filtered} getKey={r=>r.id} columns={[{key:"record",header:"Registro",render:r=>r.recordNumber},{key:"product",header:"Producto",render:r=><div className="cell-stack"><strong>{r.product.name}</strong><span>{r.product.sku}</span></div>},{key:"movement",header:"Movimiento",render:r=>r.movementType.replaceAll("_"," ")},{key:"batch",header:"Lote",render:r=>r.batch?.batchNumber??"—"},{key:"qty",header:"Cantidad",render:r=>r.quantity},{key:"status",header:"Estado",render:r=><StatusBadge value={r.status}/>} ]}/>:<div className="module-empty"><span className="module-empty__icon"><LockKeyhole size={27}/></span><strong>Sin registros</strong><p>Registra el primer movimiento controlado.</p></div>}</section></>:null}<ActionModal open={open} title="Nuevo registro controlado" fields={fields} initialValues={{movementType:"ADJUSTMENT_IN",quantity:1}} busy={busy} error={actionError} onClose={close} onSubmit={save}/></div>}
