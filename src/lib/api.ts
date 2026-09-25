@@ -1,13 +1,23 @@
 import axios from "axios";
 
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
+
 export const API_URL =
-  import.meta.env.VITE_API_URL?.trim() || "http://localhost:3000/api";
+  configuredApiUrl ||
+  (import.meta.env.PROD
+    ? "https://terse-nonabiding-creola.ngrok-free.dev/api"
+    : "http://localhost:3000/api");
+
+const ngrokHeaders = {
+  "ngrok-skip-browser-warning": "true",
+};
 
 export const api = axios.create({
   baseURL: API_URL,
   timeout: 15000,
   headers: {
     "Content-Type": "application/json",
+    ...ngrokHeaders,
   },
 });
 
@@ -41,9 +51,19 @@ api.interceptors.response.use(
         original._retry = true;
 
         try {
-          const { data } = await axios.post(`${API_URL}/auth/refresh`, {
-            refreshToken,
-          });
+          const { data } = await axios.post(
+            `${API_URL}/auth/refresh`,
+            {
+              refreshToken,
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                ...ngrokHeaders,
+              },
+              timeout: 15000,
+            },
+          );
 
           const accessToken = data.accessToken as string;
 
@@ -52,6 +72,7 @@ api.interceptors.response.use(
           original.headers = {
             ...(original.headers ?? {}),
             Authorization: `Bearer ${accessToken}`,
+            "ngrok-skip-browser-warning": "true",
           };
 
           return axios(original);
@@ -59,6 +80,7 @@ api.interceptors.response.use(
           localStorage.removeItem("farmacia_access_token");
           localStorage.removeItem("farmacia_refresh_token");
           localStorage.removeItem("farmacia_user");
+
           window.location.href = "/login";
         }
       }
