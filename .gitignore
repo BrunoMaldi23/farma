@@ -12,7 +12,14 @@ dist
 dist-ssr
 *.local
 .env
+.env.production
 generated
+backup-*/
+*.zip
+*.7z
+actualizar_*.ps1
+instalar_*.ps1
+aplicar_*.ps1
 
 # Editor directories and files
 .vscode/*
