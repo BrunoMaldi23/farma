@@ -9,7 +9,7 @@ import { useResource } from "../hooks/useResource";
 import { api } from "../lib/api";
 import { nullable, numeric, runApiAction } from "../lib/actionHelpers";
 
-type Basic = { id: string; code: string; name: string; isActive: boolean };
+type Basic = { id: string; code: string; name: string; description?: string | null; isActive: boolean };
 type Product = {
   id: string; sku: string; barcode: string | null; name: string; description?: string | null;
   productType: string; prescriptionType: string; controlledDrugType: string;
@@ -26,7 +26,7 @@ const normalize = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, 
 export const ProductsPage = () => {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
-  const [modal, setModal] = useState<"product" | "category" | "laboratory" | null>(null);
+  const [modal, setModal] = useState<"product" | "category" | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -35,7 +35,7 @@ export const ProductsPage = () => {
   const basicSelector = useCallback((p: any) => p.items as Basic[], []);
   const productsRes = useResource<Product[]>("/products?limit=100", productSelector);
   const categoriesRes = useResource<Basic[]>("/categories?limit=100", basicSelector);
-  const laboratoriesRes = useResource<Basic[]>("/laboratories?limit=100", basicSelector);
+  const laboratoriesRes = useResource<Basic[]>("/laboratories?limit=100&active=true", basicSelector);
 
   const products = productsRes.data ?? [];
   const categories = categoriesRes.data ?? [];
@@ -91,11 +91,11 @@ export const ProductsPage = () => {
   };
 
   const saveBasic = async (v: Record<string, any>) => {
-    const endpoint = modal === "category" ? "/categories" : "/laboratories";
+    const payload = { code: String(v.code), name: String(v.name), description: nullable(v.description), isActive: true };
     await runApiAction(
-      () => api.post(endpoint, { code: String(v.code), name: String(v.name), description: nullable(v.description), isActive: true }),
+      () => api.post("/categories", payload),
       setBusy, setActionError,
-      async () => { await Promise.all([categoriesRes.reload(), laboratoriesRes.reload()]); close(); },
+      async () => { await Promise.all([productsRes.reload(), categoriesRes.reload()]); close(); },
     );
   };
 
@@ -116,7 +116,6 @@ export const ProductsPage = () => {
       actions={<div className="module-toolbar-actions">
         <button className="button button--secondary" onClick={() => void productsRes.reload()}><RefreshCcw size={17}/>Actualizar</button>
         <button className="button button--secondary" onClick={() => setModal("category")}><Plus size={17}/>Categoría</button>
-        <button className="button button--secondary" onClick={() => setModal("laboratory")}><Plus size={17}/>Laboratorio</button>
         <button className="button button--primary" onClick={() => { setEditing(null); setModal("product"); }}><Plus size={17}/>Nuevo producto</button>
       </div>} />
     {productsRes.loading ? <PageLoader /> : null}
@@ -142,6 +141,6 @@ export const ProductsPage = () => {
     </> : null}
 
     <ActionModal open={modal==="product"} title={editing?"Editar producto":"Nuevo producto"} fields={productFields} initialValues={initial} busy={busy} error={actionError} onClose={close} onSubmit={saveProduct}/>
-    <ActionModal open={modal==="category" || modal==="laboratory"} title={modal==="category"?"Nueva categoría":"Nuevo laboratorio"} fields={[{name:"code",label:"Código",required:true},{name:"name",label:"Nombre",required:true},{name:"description",label:"Descripción",type:"textarea"}]} busy={busy} error={actionError} onClose={close} onSubmit={saveBasic}/>
+    <ActionModal open={modal==="category"} title="Nueva categoría" fields={[{name:"code",label:"Código",required:true},{name:"name",label:"Nombre",required:true},{name:"description",label:"Descripción",type:"textarea"}]} busy={busy} error={actionError} onClose={close} onSubmit={saveBasic}/>
   </div>;
 };

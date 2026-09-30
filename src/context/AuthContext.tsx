@@ -9,17 +9,17 @@
 } from "react";
 
 import { api } from "../lib/api";
+import { hasUserPermission } from "../lib/access";
 import type {
   AuthUser,
   LoginResponse,
-  PermissionValue,
 } from "../types/auth";
 
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
   authenticated: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
@@ -42,51 +42,6 @@ const getStoredUser = (): AuthUser | null => {
   } catch {
     return null;
   }
-};
-
-const getPermissionCode = (
-  permission: PermissionValue,
-): string => {
-  if (typeof permission === "string") {
-    return permission;
-  }
-
-  return permission.code;
-};
-
-const getRoleCode = (
-  user: AuthUser | null,
-): string | null => {
-  if (!user) {
-    return null;
-  }
-
-  if (typeof user.role === "string") {
-    return user.role;
-  }
-
-  return user.role?.code ?? null;
-};
-
-const getUserPermissions = (
-  user: AuthUser | null,
-): string[] => {
-  if (!user) {
-    return [];
-  }
-
-  const directPermissions =
-    user.permissions ?? [];
-
-  const rolePermissions =
-    typeof user.role === "object"
-      ? user.role.permissions ?? []
-      : [];
-
-  return [
-    ...directPermissions,
-    ...rolePermissions,
-  ].map(getPermissionCode);
 };
 
 export const AuthProvider = ({
@@ -173,6 +128,8 @@ export const AuthProvider = ({
       );
 
       setUser(data.user);
+
+      return data.user;
     },
     [],
   );
@@ -197,15 +154,7 @@ export const AuthProvider = ({
   const hasPermission =
     useCallback(
       (permission: string) => {
-        const roleCode =
-          getRoleCode(user);
-
-        if (roleCode === "ADMIN") {
-          return true;
-        }
-
-        return getUserPermissions(user)
-          .includes(permission);
+        return hasUserPermission(user, permission);
       },
       [user],
     );

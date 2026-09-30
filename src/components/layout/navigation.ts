@@ -5,6 +5,7 @@ import {
   FileText,
   Handshake,
   LayoutDashboard,
+  Building2,
   PackageSearch,
   Pill,
   ReceiptText,
@@ -70,6 +71,12 @@ export const navigation = [
         label: "Productos",
         to: "/products",
         icon: Pill,
+        permission: "products.read",
+      },
+      {
+        label: "Laboratorios",
+        to: "/laboratories",
+        icon: Building2,
         permission: "products.read",
       },
       {

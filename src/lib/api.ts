@@ -5,19 +5,14 @@ const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 export const API_URL =
   configuredApiUrl ||
   (import.meta.env.PROD
-    ? "https://terse-nonabiding-creola.ngrok-free.dev/api"
+    ? "http://farmagestion-backend-env-3.eba-2mi4erfp.us-east-1.elasticbeanstalk.com/api"
     : "http://localhost:3000/api");
-
-const ngrokHeaders = {
-  "ngrok-skip-browser-warning": "true",
-};
 
 export const api = axios.create({
   baseURL: API_URL,
   timeout: 15000,
   headers: {
     "Content-Type": "application/json",
-    ...ngrokHeaders,
   },
 });
 
@@ -59,7 +54,6 @@ api.interceptors.response.use(
             {
               headers: {
                 "Content-Type": "application/json",
-                ...ngrokHeaders,
               },
               timeout: 15000,
             },
@@ -72,7 +66,6 @@ api.interceptors.response.use(
           original.headers = {
             ...(original.headers ?? {}),
             Authorization: `Bearer ${accessToken}`,
-            "ngrok-skip-browser-warning": "true",
           };
 
           return axios(original);

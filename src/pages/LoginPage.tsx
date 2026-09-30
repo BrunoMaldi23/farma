@@ -3,28 +3,28 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
-  FlaskConical,
   LockKeyhole,
   UserRound,
 } from "lucide-react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
+import { getDefaultAuthenticatedPath } from "../lib/access";
 import { getApiErrorMessage } from "../lib/api";
 
 export const LoginPage = () => {
-  const { authenticated, login } = useAuth();
+  const { authenticated, login, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("Admin12345!");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (authenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={getDefaultAuthenticatedPath(user)} replace />;
   }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -34,13 +34,16 @@ export const LoginPage = () => {
     setSubmitting(true);
 
     try {
-      await login(username, password);
+      const loggedUser = await login(username, password);
 
       const from =
         (location.state as { from?: { pathname?: string } } | null)?.from
           ?.pathname || "/";
 
-      navigate(from, { replace: true });
+      const fallbackPath = getDefaultAuthenticatedPath(loggedUser);
+      const nextPath = from === "/" || from === "/403" ? fallbackPath : from;
+
+      navigate(nextPath, { replace: true });
     } catch (requestError) {
       setError(getApiErrorMessage(requestError));
     } finally {
@@ -77,7 +80,11 @@ export const LoginPage = () => {
             <p>Ingresa tus credenciales para acceder al sistema.</p>
           </header>
 
-          <form onSubmit={handleSubmit} className="login-clean__form">
+          <form
+            onSubmit={handleSubmit}
+            className="login-clean__form"
+            autoComplete="off"
+          >
             <label className="login-clean__field">
               <span>Usuario</span>
 
@@ -85,7 +92,7 @@ export const LoginPage = () => {
                 <UserRound size={19} aria-hidden="true" />
 
                 <input
-                  autoComplete="username"
+                  autoComplete="off"
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
                   placeholder="Ingresa tu usuario"
@@ -103,7 +110,7 @@ export const LoginPage = () => {
 
                 <input
                   type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="Ingresa tu contraseña"
@@ -140,20 +147,6 @@ export const LoginPage = () => {
               {!submitting ? <ArrowRight size={18} /> : null}
             </button>
           </form>
-
-          <div className="login-clean__divider">
-            <span>Acceso de desarrollo</span>
-          </div>
-
-          <div className="login-clean__demo">
-            <FlaskConical size={20} aria-hidden="true" />
-
-            <div>
-              <span>Usuario: <strong>admin</strong></span>
-              <i aria-hidden="true">•</i>
-              <span>Clave: <strong>Admin12345!</strong></span>
-            </div>
-          </div>
 
           <p className="login-clean__security">
             Acceso protegido mediante autenticación y permisos por rol.

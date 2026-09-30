@@ -3,6 +3,8 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { PermissionRoute } from "./components/auth/PermissionRoute";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { AppShell } from "./components/layout/AppShell";
+import { useAuth } from "./context/AuthContext";
+import { getDefaultAuthenticatedPath } from "./lib/access";
 import { AgreementsPage } from "./pages/AgreementsPage";
 import { CashPage } from "./pages/CashPage";
 import { ControlledPage } from "./pages/ControlledPage";
@@ -10,6 +12,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DoctorsPage } from "./pages/DoctorsPage";
 import { ForbiddenPage } from "./pages/ForbiddenPage";
 import { InventoryPage } from "./pages/InventoryPage";
+import { LaboratoriesPage } from "./pages/LaboratoriesPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { PatientsPage } from "./pages/PatientsPage";
@@ -24,6 +27,17 @@ import { UsersPage } from "./pages/UsersPage";
 
 
 
+const HomeRoute = () => {
+  const { user } = useAuth();
+  const defaultPath = getDefaultAuthenticatedPath(user);
+
+  if (defaultPath !== "/") {
+    return <Navigate to={defaultPath} replace />;
+  }
+
+  return <DashboardPage />;
+};
+
 export default function App() {
   return (
     <Routes>
@@ -31,7 +45,7 @@ export default function App() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={<HomeRoute />} />
 
           <Route element={<PermissionRoute permission="sales.create" />}>
             <Route path="/pos" element={<PosPage />} />
@@ -55,6 +69,7 @@ export default function App() {
 
           <Route element={<PermissionRoute permission="products.read" />}>
             <Route path="/products" element={<ProductsPage />} />
+            <Route path="/laboratories" element={<LaboratoriesPage />} />
           </Route>
 
           <Route element={<PermissionRoute permission="patients.read" />}>
